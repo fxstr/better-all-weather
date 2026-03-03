@@ -57,9 +57,10 @@ def fetch_data(api_key, symbols, start='1990-01-01', end=date.today()):
             ],
             columns = ['date', symbol],
         )
-        # Convert'2025-01-02T00:00:00.000Z' to a date (no time, no timezone)
-        current_series['date'] = pd.to_datetime(current_series['date']).dt.tz_localize(None).dt.date
         current_series = current_series.set_index('date')
+        # If we use .date here (which looks nicer), we lose the ability to call e.g. rolling('40D')
+        # on the df
+        current_series.index = pd.to_datetime(current_series.index)
         series.append(current_series)
 
         print(f'Got data for {symbol} from {current_series.index[0]} to {current_series.index[-1]}')
