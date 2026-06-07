@@ -343,7 +343,9 @@ def _(mo, pd, plot_utils, plt, result):
     _ax.axhline(0, color="black", linewidth=0.8)
     _ax.set_xlabel("")
     _ax.set_xticklabels(
-        [p.strftime("%Y-%m") for p in _monthly_returns_pct.index], rotation=45, ha="right"
+        [p.strftime("%Y-%m") for p in _monthly_returns_pct.index],
+        rotation=45,
+        ha="right",
     )
     _html_monthly = plot_utils.fig_html(_fig)
 
