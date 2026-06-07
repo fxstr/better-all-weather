@@ -3,7 +3,7 @@ import json
 import pandas as pd
 from datetime import date
 
-def fetch_data(api_key, symbols, start='1990-01-01', end=date.today()):
+def fetch_data(api_key, symbols, start='1990-01-01', end=None):
     """
     Don't use pandas_datareader; it's broken and no-one fixes it:
     https://github.com/pydata/pandas-datareader/issues/965
@@ -30,6 +30,8 @@ def fetch_data(api_key, symbols, start='1990-01-01', end=date.today()):
         If for at least one symbol there's no data available (thrown by pandas_datareader)
     """
 
+    if end is None:
+        end = date.today()
     print(f'Get data for {symbols}, from {start} to {end}')
     base_url = "https://api.tiingo.com/tiingo/daily"
 

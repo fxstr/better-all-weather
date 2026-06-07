@@ -52,8 +52,8 @@ def _(mo):
       Across every timeframe, we use -1 for a negative trend and +1 for a positive one to account for
       the steeper slopes of shorter timeframes. We then use the mean across those -1/1 values to
       determine the trend.
-    - Pass all instruments with positive trends to the Ledoit-Wolf algorithm to determine the weights.
-      We use Ledoit-Wolf (that simplifies covariance estimation) and optimize for maximum diversification.
+    - Pass all instruments with positive trends to the weight allocation step.
+      We use equal weight across trending instruments.
     - We average the trends; this results in a number between -1 and 1; we adjust it to go from 0 to 1
       which gives us the target exposure; we then multiply our weights by it to get the adjusted weights.
 
@@ -182,10 +182,8 @@ def _(data, go_long, mo, pd, plot_utils, plt, trend):
 # Weights: Ledoit-Wolf allocation across trending instruments at each rebalance date
 @app.cell
 def _(common_index, data, go_long, ledoit_wolf, pd):
-    # For each rebalance date, pass ONLY trending instruments to Ledoit-Wolf.
-    # Passing non-trending instruments would distort the covariance matrix:
-    # Ledoit-Wolf optimizes diversification across whatever you hand it,
-    # so flat/bearish instruments would absorb weight they shouldn't hold.
+    # For each rebalance date, pass ONLY trending instruments to the weight function.
+    # Non-trending instruments receive zero weight.
     _lookback = pd.Timedelta(days=60)
     _first_eligible_date = data.index[0] + _lookback
 
@@ -218,7 +216,9 @@ def _(mo, plot_utils, plt, trend, weights):
     # Without the scaling, 3 out of 4 instruments trending up only reaches 75% exposition
     # because TMF and TMV are counter-trend to each other, so one is always dragging the mean down.
     # The 4/3 factor pushes 3/4 bullish → 100% exposed.
-    max_exposition = ((trend.mean(axis=1) + 1) / 2 * (4 / 3)).clip(upper=1)
+    # reindex to weights.index: trend has a row for every month, but weights skips months
+    # where no instrument was trending — reindex aligns them before multiplying.
+    max_exposition = ((trend.reindex(weights.index).mean(axis=1) + 1) / 2 * (4 / 3)).clip(upper=1)
     adjusted_weights = weights.mul(max_exposition, axis=0)
 
     _w52 = weights.iloc[-52:]

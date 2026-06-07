@@ -1,6 +1,7 @@
 import numpy as np
-from sklearn.covariance import LedoitWolf
 from scipy.optimize import minimize
+from sklearn.covariance import LedoitWolf
+
 
 # Use Ledoit-Wolf covariance + Maximum Diversification objective
 def calculate_weights(data):
@@ -20,7 +21,7 @@ def calculate_weights(data):
         objective,
         np.ones(n) / n,
         bounds=[(0, 1)] * n,
-        constraints={'type': 'eq', 'fun': lambda w: np.sum(w) - 1},
+        constraints={"type": "eq", "fun": lambda w: np.sum(w) - 1},
     )
 
     if result.success:
