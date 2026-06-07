@@ -1,264 +1,374 @@
-# -*- coding: utf-8 -*-
-# ---
-# jupyter:
-#   jupytext:
-#     cell_metadata_filter: -all
-#     custom_cell_magics: kql
-#     text_representation:
-#       extension: .py
-#       format_name: percent
-#       format_version: '1.3'
-#       jupytext_version: 1.11.2
-#   kernelspec:
-#     display_name: .venv
-#     language: python
-#     name: python3
-# ---
+import marimo
 
-# %% [markdown]
-# # What do we do here? 
-# - Get data from Tiingo
-# - Use linear regression slope of multiple timeframes to determine every instrument's trend.
-#   Across every timeframe, we use -1 for a negative trend and +1 for a positive one to account for
-#   the steeper slopes of shorter timeframes. We then use the mean across those -1/1 values to
-#   determine the trend.
-# - Pass all instrument with positive trends to the Ledoit-Wolf algorithm to determine the weights.
-#   We use Ledoit Wolf (that simplifies covariance estimation) and optimize for maximum
-#   diversification.
-# - We average the trends; this results in a number between -1 and 1; we adjust it to go from 0 to 1 
-#   which gies us the target exposure; we then multiply our weights by it to get the adjusted weights.
-#
-#   We could go weekly with trend [20, 30, 40, 50, 60] and 30 lookback for Ledoit-Wolf.
-#
-# ## Expectations
-# - Triple ETFs & max. exp. = long / all: 12% CAGR, 29% MaxDD ➝ 2.42
-# - Triple ETFs & max. exp. = 100%: 16% CAGR, 39% MaxDD ➝ 2.43
-# - Double ETFs & max. exp. = 100%: 13% CAGR, 38% MaxDD ➝ 2.43
-
-# %%
-# %reload_ext autoreload
-# %autoreload 2
-
-import tiingo_fetcher
-import numpy as np
-import pandas as pd
-from matplotlib import pyplot as plt
-import backtest
-import ledoit_wolf
-from datetime import date
-from dotenv import load_dotenv
-import monthly_regression
-import os
-
-# Make charts interactive
-# # %matplotlib widget
-
-# %%
-load_dotenv()
-api_key = os.getenv('TIINGO_API_KEY')
-
-# 3× leveraged
-# instruments = ['UPRO', 'UGL', 'TMF', 'TMV', 'AGQ', 'QLD', 'UCO', 'CHAU']
-instruments = ['UPRO', 'UGL', 'TMF', 'TMV']
-# 2× leveraged
-# instruments = ['SSO', 'UGL', 'UBT', 'TBT', 'AGQ']
-# 1× leveraged
-# instruments = ['SPY', 'GLD', 'TLT', 'TBF']
-
-etf_data = tiingo_fetcher.fetch_data(api_key, instruments, end=date.today()) 
-
-# %%
-# Limit data (debug / devlop)
-data = etf_data.loc[:]
-
-print('Latest data')
-print(data.tail(5))
-
-# Only drop data *after* selecting instruments (or we will drop too much) 
-data = data.dropna()
-
-relative_closes = data / data.iloc[0]
-relative_closes.plot(figsize=(15, 6))
-
-latest_closes = data.iloc[-50:]
-latest_relative_closes = latest_closes / latest_closes.iloc[0]
-latest_relative_closes.plot(figsize=(15, 6))
+__generated_with = "0.23.9"
+app = marimo.App(width="wide")
 
 
-# %%
-# Get regression slopes for multiple timeframes, convert them to -1/1 and calculate their mean
-trend_timeframes = [40, 60, 80, 100]
+# Imports: all third-party and local modules
+@app.cell
+def _():
+    # Variables prefixed with _ are cell-private in Marimo: they are not exported into
+    # the reactive graph and cannot be referenced by other cells. Only names listed in
+    # `return` are shared. Use _ for anything that is intermediate or display-only.
+    import os
+    from datetime import date
 
-# An array with one df per timeframe
-slopes = []
+    import marimo as mo
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+    from dotenv import load_dotenv
 
-for timeframe in trend_timeframes:
-    current_tf = f'{timeframe}D'
-    print(f'Calculating trend for timeframe {current_tf}')
-    slope = data.rolling(current_tf).apply(monthly_regression.get_relative_slope)
-    slope = slope.dropna()
-    slopes.append(slope)
+    import backtest
+    import ledoit_wolf
+    import monthly_regression
+    import plot_utils
+    import tiingo_fetcher
 
-# Convert every entry to -1, 0 or 1
-binary_slopes = [
-    np.sign(slope)
-    for slope in slopes
-]
-
-# We must make sure that all dfs within the array have the same dimensions and indexes
-common_index = binary_slopes[0].index
-for df in binary_slopes[1:]:
-    common_index = common_index.intersection(df.index)
-common_binary_slopes = [df.loc[common_index] for df in binary_slopes]
-
-# Get mean over all timeframes
-trend = sum(common_binary_slopes) / len(trend_timeframes)
-go_long = trend > 0
-print(f'Most recent trends are:\n{trend.iloc[-5:]}')
-
-# Try an approach where we go long when our sum of trends is in the top 1/3 over the last 2 years
-# trend_sum = sum(df.loc[common_index] for df in slopes)
-# threshold = trend_sum.rolling('730D').quantile(0.8)
-# go_long = trend_sum >= threshold
-# print(f'Quantile based long positions are\n{go_long.tail(5)}')
-
-# %%
-# Just print the instruments
-instruments = trend.columns
-for instrument in instruments:
-  instrument_data = pd.DataFrame({
-    'trend': trend[instrument],
-    'data': data[instrument]
-  })
-  # We only get trends for the first day of the month; every other day will be NaN. Use the previous
-  # value for all subsequent days of the month.
-  instrument_data['trend'] = instrument_data['trend'].ffill()
-  fig, ax1 = plt.subplots(figsize=(16, 8))
-  ax2 = ax1.twinx()
-  ax2.plot(instrument_data.trend, color='#ADD8E6')
-  ax1.plot(instrument_data.data)
-  plt.title(instrument)
-  plt.show()
+    return (
+        backtest,
+        date,
+        ledoit_wolf,
+        load_dotenv,
+        mo,
+        monthly_regression,
+        np,
+        os,
+        pd,
+        plot_utils,
+        plt,
+        tiingo_fetcher,
+    )
 
 
-# %%
-weight_list = []
-lookback_delta = pd.Timedelta(days=60)
+# Introduction: strategy description and performance expectations
+@app.cell
+def _(mo):
+    mo.md(r"""
+    # Ledoit-Wolf Trend Strategy
 
-# Only start after lookback_days have passed to make sure that the blocks are not too small at
-# the beginning.
-first_date = data.index[0] + lookback_delta
+    - Get data from Tiingo
+    - Use linear regression slope of multiple timeframes to determine every instrument's trend.
+      Across every timeframe, we use -1 for a negative trend and +1 for a positive one to account for
+      the steeper slopes of shorter timeframes. We then use the mean across those -1/1 values to
+      determine the trend.
+    - Pass all instruments with positive trends to the Ledoit-Wolf algorithm to determine the weights.
+      We use Ledoit-Wolf (that simplifies covariance estimation) and optimize for maximum diversification.
+    - We average the trends; this results in a number between -1 and 1; we adjust it to go from 0 to 1
+      which gives us the target exposure; we then multiply our weights by it to get the adjusted weights.
 
-# Get the Ledoit Wolf weights; only use the instruments that have a positive trend, discard the
-# rest *before* calculating the weights (Ledoit Wolf uses covariance; passing in unused instruments
-# would invalidate the matrix to some extent)
-for end_date in common_index[common_index > first_date]:
-    start_date = end_date - lookback_delta
-    # Only use last x days (every block gets longer)
-    current_block = data[data.index > start_date].loc[:end_date]
-    print(f'Calculating weights from {start_date} to {end_date} {len(current_block)} rows.')
-    # Only pass thrending instruments to Ledoit Wolf
-    current_long = go_long.loc[end_date]
-    long_instruments = current_long[current_long].index.values
-    print(f'Long on {end_date}: {long_instruments}')
-    current_block_with_uptrend = current_block[long_instruments]
-    if long_instruments.size == 0:
-        continue
-    weights = ledoit_wolf.calculate_weights(current_block_with_uptrend)
-    series = pd.Series(weights, index=current_block_with_uptrend.columns, name=current_block.index[-1])
-    weight_list.append(series)
+    We could go weekly with trend [20, 30, 40, 50, 60] and 30 lookback for Ledoit-Wolf.
 
-weights = pd.concat(weight_list, axis=1).T
-weights = weights.fillna(0)
+    ## Expectations
+    - Triple ETFs & max. exp. = long / all: 12% CAGR, 29% MaxDD → 2.42
+    - Triple ETFs & max. exp. = 100%: 16% CAGR, 39% MaxDD → 2.43
+    - Double ETFs & max. exp. = 100%: 13% CAGR, 38% MaxDD → 2.43
+    """)
+    return
 
-# Test equal weights 
-# weights[:] = 1 / len(data.columns)
-# weights[trend < 0] = 0
-# weights = weights.mul(1 / weights.sum(axis = 1), axis = 0)
 
-weights.iloc[-52:].plot(kind='bar', stacked=True, figsize=(16, 8))
-weights.iloc[-52:].sum(axis = 1).plot()
+# Config: API key and instrument selection
+@app.cell
+def _(load_dotenv, os):
+    load_dotenv()
+    api_key = os.getenv("TIINGO_API_KEY")
+    # 3× leveraged
+    instruments = ["UPRO", "UGL", "TMF", "TMV"]
+    # 2× leveraged
+    # instruments = ['SSO', 'UGL', 'UBT', 'TBT', 'AGQ']
+    # 1× leveraged
+    # instruments = ['SPY', 'GLD', 'TLT', 'TBF']
+    return api_key, instruments
 
-print(f'Latest weights:\n{weights.tail(5)}')
 
-# %%
-# Limit exposition to relative weight of instruments with an uptrend (if 3/4 instruments have
-# an uptrend, expose 75%)
-# Trends' mean flucutates between -1 (all negative) and 1 (all positive); adjust to go from 0 to 1
-max_exposition = (trend.mean(axis=1) + 1) / 2
-# max_exposition[:] = 1
+# Data: fetch adjusted close prices from Tiingo
+@app.cell
+def _(api_key, date, instruments, tiingo_fetcher):
+    _raw = tiingo_fetcher.fetch_data(api_key, instruments, end=date.today())
+    # Drop rows where any instrument has no data yet (e.g. TMV launched after UPRO)
+    data = _raw.dropna()
+    return (data,)
 
-# max_exposition is usually max. 0.75 because TMF and TMV are contrarian. Let's push it a bit so
-# that we get 100% exposition when 3 of 4 instruments have an uptrend (if not, we limit ourselves
-# to 0.75 most of the time)
-max_exposition = max_exposition * 4 / 3
-max_exposition[max_exposition > 1] = 1
-# max_exposition[:] = 1
 
-# When either TMV *OR* TMF are true, go to 100%
-# consolidated_trend = go_long.astype(bool)
-# consolidated_trend['TM'] = consolidated_trend['TMF'] | consolidated_trend['TMV']
-# consolidated_trend = consolidated_trend.drop(columns=['TMF', 'TMV'])
-# print(consolidated_trend)
-# max_exposition = (consolidated_trend.mean(axis=1) + 1) / 2
+# Price charts: relative performance across full history and last 50 days
+@app.cell
+def _(data, mo, plot_utils, plt):
+    # Normalize to the first row so all series start at 1.0,
+    # making relative performance visually comparable across instruments
+    _fig, _ax = plt.subplots(figsize=(15, 6))
+    (data / data.iloc[0]).plot(ax=_ax, title="Relative closes (full history)")
+    _html_full = plot_utils.fig_html(_fig)
 
-# Limit max expsoition
-adjusted_weights = weights.mul(max_exposition, axis=0)
+    _last_50 = data.iloc[-50:]
+    _fig, _ax = plt.subplots(figsize=(15, 6))
+    (_last_50 / _last_50.iloc[0]).plot(ax=_ax, title="Relative closes (last 50 days)")
+    _html_recent = plot_utils.fig_html(_fig)
 
-print('Adjusted Weights:')
-formatted = series.apply(lambda x: f"{x * 100:.2f}%")
-print(adjusted_weights.iloc[-1].apply(lambda x: f'{x * 100:.1f}%').to_string()) 
-print('---')
+    mo.vstack(
+        [
+            mo.md(f"**Latest data:**\n\n```\n{data.tail(5).to_string()}\n```"),
+            _html_full,
+            _html_recent,
+        ]
+    )
+    return
 
-account_value = 200_000
 
-latest_quote = data.iloc[-1]
-print('Latest Quotes:')
-print(latest_quote.to_string())
-print('---')
-distribution = account_value * adjusted_weights.iloc[-1]
-print('Distribution:')
-print(distribution.apply(np.floor).to_string())
-print('---')
-print('Positions:')
-print((distribution / latest_quote).apply(np.floor).to_string())
-print('---')
+# Trend: multi-timeframe regression slope → ±1 signal → mean trend per instrument
+@app.cell
+def _(data, monthly_regression, np):
+    # Compute rolling regression slope for each timeframe and convert to ±1 sign.
+    # Sign normalization is essential: raw slopes are not comparable across timeframes
+    # because shorter windows produce steeper absolute slopes. ±1 puts all timeframes
+    # on the same scale before averaging.
+    _timeframes = [40, 60, 80, 100]
+    _raw_slopes = [
+        data.rolling(f"{tf}D").apply(monthly_regression.get_relative_slope).dropna()
+        for tf in _timeframes
+    ]
+    _signed_slopes = [np.sign(s) for s in _raw_slopes]
 
-adjusted_weights.sum(axis=1).plot(figsize=(16, 3))
-max_exposition.plot()
-adjusted_weights.plot(kind='bar', stacked=True, figsize=(16, 8))
+    # Each timeframe may start on a slightly different date; intersect to get a common index
+    common_index = _signed_slopes[0].index
+    for _slope_df in _signed_slopes[1:]:
+        common_index = common_index.intersection(_slope_df.index)
+    _aligned_slopes = [s.loc[common_index] for s in _signed_slopes]
 
-print(adjusted_weights.iloc[-5:])
+    # Mean across timeframes: -1 = all bearish, +1 = all bullish, 0 = mixed
+    trend = sum(_aligned_slopes) / len(_timeframes)
+    go_long = trend > 0
+    return common_index, go_long, trend
 
-# %%
-# bt needs dates as datetimes
-data.index = pd.to_datetime(data.index)
-adjusted_weights.index = pd.to_datetime(adjusted_weights.index)
 
-# Limit backtest
-# data = data[:'2024-12-31']
-# adjusted_weights = adjusted_weights[:'2024-12-31']
+# Trend charts: price overlaid with trend signal and holding periods (last 2 years)
+@app.cell
+def _(data, go_long, mo, pd, plot_utils, plt, trend):
+    # Overlay trend signal on price for each instrument.
+    # Trend is computed at month-end; ffill carries the signal forward through the month.
+    _cutoff = data.index[-1] - pd.DateOffset(years=2)
+    _trend_figs = []
+    for _instrument in trend.columns:
+        _price = data[_instrument][data.index >= _cutoff]
+        _trend_signal = trend[_instrument].reindex(_price.index, method="ffill")
+        _holding = (
+            go_long[_instrument].reindex(_price.index, method="ffill").fillna(False)
+        )
 
-result = backtest.run('ledoit_wolf', data, adjusted_weights)
+        _fig, _price_ax = plt.subplots(figsize=(16, 8))
+        _trend_ax = _price_ax.twinx()
+        _price_ax.plot(_price, label=_instrument)
+        _trend_ax.plot(_trend_signal, color="#ADD8E6", label="trend")
+        _price_ax.fill_between(
+            _price.index,
+            0,
+            1,
+            where=_holding,
+            transform=_price_ax.get_xaxis_transform(),
+            alpha=0.15,
+            color="green",
+        )
+        _lines = _price_ax.get_legend_handles_labels()
+        _lines_trend = _trend_ax.get_legend_handles_labels()
+        _price_ax.legend(
+            *[a + b for a, b in zip(_lines, _lines_trend)], loc="upper left"
+        )
+        _fig.suptitle(_instrument)
+        _trend_figs.append(plot_utils.fig_html(_fig))
 
-result.display()
-result.plot(figsize=(16, 8))
+    mo.vstack(_trend_figs)
+    return
 
-# Let's display how we should have done in the past month (just to check reality vs. strategy)
-first_of_month = result.prices.groupby(result.prices.index.to_period('M')).head(1)
-first_of_month_and_previous = pd.DataFrame(first_of_month)
-first_of_month_and_previous['PreviousMonth'] = first_of_month_and_previous.shift(1)
-for index, row in first_of_month_and_previous.iterrows():
-  print(f'{index.date()}, {(row['ledoit_wolf'] / row['PreviousMonth']) * 100 - 100:.2f}%') 
 
-rolling_max = result.prices.cummax()
-drawdowns = (result.prices - rolling_max) / rolling_max
-drawdowns.plot(figsize=(16, 4))
-plt.show()
+# Weights: Ledoit-Wolf allocation across trending instruments at each rebalance date
+@app.cell
+def _(common_index, data, go_long, ledoit_wolf, pd):
+    # For each rebalance date, pass ONLY trending instruments to Ledoit-Wolf.
+    # Passing non-trending instruments would distort the covariance matrix:
+    # Ledoit-Wolf optimizes diversification across whatever you hand it,
+    # so flat/bearish instruments would absorb weight they shouldn't hold.
+    _lookback = pd.Timedelta(days=60)
+    _first_eligible_date = data.index[0] + _lookback
 
-recent_results = result.prices.loc[result.prices.index[-1] - pd.Timedelta(days=(60)):]
-recent_results.plot(figsize=(16, 4), title='Recent results')
-recent_rolling_max = recent_results.cummax()
-recent_drawdowns = (recent_results - recent_rolling_max) / recent_rolling_max
-recent_drawdowns.plot(figsize=(16, 4), title='Recent drawdowns')
-plt.show()
+    _weight_rows = []
+    for _date in common_index[common_index > _first_eligible_date]:
+        _lookback_window = data[data.index > _date - _lookback].loc[:_date]
+        _is_trending_up = go_long.loc[_date]
+        _trending_instruments = _is_trending_up[_is_trending_up].index.values
+        if _trending_instruments.size == 0:
+            continue
+        _instrument_weights = ledoit_wolf.calculate_weights(
+            _lookback_window[_trending_instruments]
+        )
+        _weight_rows.append(
+            pd.Series(
+                _instrument_weights,
+                index=_trending_instruments,
+                name=_lookback_window.index[-1],
+            )
+        )
+
+    weights = pd.concat(_weight_rows, axis=1).T.fillna(0)
+    return (weights,)
+
+
+# Exposition: scale weights by trend strength and display allocation charts
+@app.cell
+def _(mo, plot_utils, plt, trend, weights):
+    # Map mean trend [-1, 1] → exposition [0, 1], then scale by 4/3.
+    # Without the scaling, 3 out of 4 instruments trending up only reaches 75% exposition
+    # because TMF and TMV are counter-trend to each other, so one is always dragging the mean down.
+    # The 4/3 factor pushes 3/4 bullish → 100% exposed.
+    max_exposition = ((trend.mean(axis=1) + 1) / 2 * (4 / 3)).clip(upper=1)
+    adjusted_weights = weights.mul(max_exposition, axis=0)
+
+    _w52 = weights.iloc[-52:]
+    _fig, _ax = plt.subplots(figsize=(16, 8))
+    _w52.plot(kind="bar", stacked=True, ax=_ax, title="Weights (last 52 periods)")
+    plot_utils.set_date_ticks(_ax, _w52.index)
+    _html_weights = plot_utils.fig_html(_fig)
+
+    _fig, _ax = plt.subplots(figsize=(16, 3))
+    _w52.sum(axis=1).plot(ax=_ax, title="Weight sum (last 52 periods)")
+    _html_weight_sum = plot_utils.fig_html(_fig)
+
+    _fig, _ax = plt.subplots(figsize=(16, 3))
+    adjusted_weights.sum(axis=1).plot(ax=_ax, label="Adjusted exposure")
+    max_exposition.plot(ax=_ax, label="Max exposition")
+    _ax.legend()
+    _ax.set_title("Exposition")
+    _html_exposition = plot_utils.fig_html(_fig)
+
+    _fig, _ax = plt.subplots(figsize=(16, 8))
+    adjusted_weights.plot(kind="bar", stacked=True, ax=_ax, title="Adjusted weights")
+    plot_utils.set_date_ticks(_ax, adjusted_weights.index)
+    _html_adjusted = plot_utils.fig_html(_fig)
+
+    mo.vstack([_html_weights, _html_weight_sum, _html_exposition, _html_adjusted])
+    return adjusted_weights, max_exposition
+
+
+# Account slider: interactive input for portfolio size
+@app.cell
+def _(mo):
+    # Exported as a tuple so other cells can reference account_slider.value.
+    # Must NOT be rendered again in any other cell (double render → "Invalid server token").
+    account_slider = mo.ui.slider(
+        start=50_000,
+        stop=2_000_000,
+        step=10_000,
+        value=250_000,
+        label="Account value ($)",
+        show_value=True,
+    )
+    account_slider  # last expression = cell output; tuple return below exports the name
+    return (account_slider,)
+
+
+# Positions: current weights, prices, dollar allocation, and share counts
+@app.cell
+def _(account_slider, adjusted_weights, data, mo, np):
+    _account_value = account_slider.value
+    _latest_prices = data.iloc[-1]
+    _dollar_allocation = _account_value * adjusted_weights.iloc[-1]
+    _share_counts = (_dollar_allocation / _latest_prices).apply(np.floor)
+
+    mo.vstack(
+        [
+            mo.md("## Current Positions"),
+            mo.md(
+                f"**Adjusted Weights:**\n```\n{adjusted_weights.iloc[-1].apply(lambda x: f'{x * 100:.1f}%').to_string()}\n```"
+            ),
+            mo.md(f"**Latest Prices:**\n```\n{_latest_prices.to_string()}\n```"),
+            mo.md(
+                f"**Dollar Allocation (account: ${_account_value:,}):**\n```\n{_dollar_allocation.apply(np.floor).to_string()}\n```"
+            ),
+            mo.md(f"**Share Counts:**\n```\n{_share_counts.to_string()}\n```"),
+        ]
+    )
+    return
+
+
+# Backtest: run bt simulation with adjusted weights
+@app.cell
+def _(adjusted_weights, backtest, data, pd):
+    # bt requires DatetimeIndex; convert in private copies to avoid mutating shared state
+    _prices = data.copy()
+    _prices.index = pd.to_datetime(_prices.index)
+    _weights = adjusted_weights.copy()
+    _weights.index = pd.to_datetime(_weights.index)
+    result = backtest.run("ledoit_wolf", _prices, _weights)
+    return (result,)
+
+
+# Results: performance, drawdowns, recent returns, and monthly bar chart
+@app.cell
+def _(mo, pd, plot_utils, plt, result):
+    _fig, _ax = plt.subplots(figsize=(16, 8))
+    result.prices.plot(ax=_ax, title="Strategy performance")
+    _html_performance = plot_utils.fig_html(_fig)
+
+    _fig, _ax = plt.subplots(figsize=(16, 4))
+    plot_utils.drawdown(result.prices).plot(ax=_ax, title="Drawdowns")
+    _html_drawdown = plot_utils.fig_html(_fig)
+
+    _recent_prices = result.prices.loc[
+        result.prices.index[-1] - pd.Timedelta(days=60) :
+    ]
+    _fig, _ax = plt.subplots(figsize=(16, 4))
+    _recent_prices.plot(ax=_ax, title="Recent results (last 60 days)")
+    _html_recent = plot_utils.fig_html(_fig)
+
+    _fig, _ax = plt.subplots(figsize=(16, 4))
+    plot_utils.drawdown(_recent_prices).plot(ax=_ax, title="Recent drawdowns")
+    _html_recent_drawdown = plot_utils.fig_html(_fig)
+
+    # Monthly return = first price of the month vs. first price of the previous month
+    _month_open_prices = pd.DataFrame(
+        result.prices.groupby(result.prices.index.to_period("M")).head(1)
+    )
+    _monthly_returns_pct = (
+        _month_open_prices["ledoit_wolf"] / _month_open_prices["ledoit_wolf"].shift(1)
+        - 1
+    ).dropna() * 100
+    _monthly_returns_pct = _monthly_returns_pct.iloc[-24:]
+    _bar_colors = ["#2ecc71" if r >= 0 else "#e74c3c" for r in _monthly_returns_pct]
+
+    _fig, _ax = plt.subplots(figsize=(16, 4))
+    _monthly_returns_pct.plot(
+        kind="bar",
+        ax=_ax,
+        color=_bar_colors,
+        title="Monthly Returns (%, last 24 months)",
+    )
+    _ax.axhline(0, color="black", linewidth=0.8)
+    _ax.set_xlabel("")
+    _ax.set_xticklabels(
+        [p.strftime("%Y-%m") for p in _monthly_returns_pct.index], rotation=45, ha="right"
+    )
+    _html_monthly = plot_utils.fig_html(_fig)
+
+    _stats_keys = [
+        "start",
+        "end",
+        "total_return",
+        "cagr",
+        "max_drawdown",
+        "calmar",
+    ]
+    mo.vstack(
+        [
+            mo.md(
+                f"## Backtest Results\n\n**Stats:**\n```\n{result.stats.loc[_stats_keys].to_string()}\n```"
+            ),
+            _html_performance,
+            _html_drawdown,
+            _html_recent,
+            _html_recent_drawdown,
+            _html_monthly,
+        ]
+    )
+    return
+
+
+if __name__ == "__main__":
+    app.run()
