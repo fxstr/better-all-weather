@@ -218,7 +218,9 @@ def _(mo, plot_utils, plt, trend, weights):
     # The 4/3 factor pushes 3/4 bullish → 100% exposed.
     # reindex to weights.index: trend has a row for every month, but weights skips months
     # where no instrument was trending — reindex aligns them before multiplying.
-    max_exposition = ((trend.reindex(weights.index).mean(axis=1) + 1) / 2 * (4 / 3)).clip(upper=1)
+    max_exposition = (
+        (trend.reindex(weights.index).mean(axis=1) + 1) / 2 * (4 / 3)
+    ).clip(upper=1)
     adjusted_weights = weights.mul(max_exposition, axis=0)
 
     _w52 = weights.iloc[-52:]
@@ -312,23 +314,23 @@ def _(mo, pd, plot_utils, plt, result):
     _html_drawdown = plot_utils.fig_html(_fig)
 
     _recent_prices = result.prices.loc[
-        result.prices.index[-1] - pd.Timedelta(days=60) :
+        result.prices.index[-1] - pd.Timedelta(days=180) :
     ]
     _fig, _ax = plt.subplots(figsize=(16, 4))
-    _recent_prices.plot(ax=_ax, title="Recent results (last 60 days)")
+    _recent_prices.plot(ax=_ax, title="Recent results (last 180 days)")
     _html_recent = plot_utils.fig_html(_fig)
 
     _fig, _ax = plt.subplots(figsize=(16, 4))
-    plot_utils.drawdown(_recent_prices).plot(ax=_ax, title="Recent drawdowns")
+    plot_utils.drawdown(_recent_prices).plot(
+        ax=_ax, title="Recent drawdowns (last 180 days)"
+    )
     _html_recent_drawdown = plot_utils.fig_html(_fig)
 
-    # Monthly return = first price of the month vs. first price of the previous month
-    _month_open_prices = pd.DataFrame(
-        result.prices.groupby(result.prices.index.to_period("M")).head(1)
-    )
+    # Monthly return = last price of the month vs. last price of the previous month.
+    # Using month-end (not month-start) ensures the bar labeled "2026-04" shows April's return.
+    _month_end_prices = result.prices.resample("ME").last()
     _monthly_returns_pct = (
-        _month_open_prices["ledoit_wolf"] / _month_open_prices["ledoit_wolf"].shift(1)
-        - 1
+        _month_end_prices["ledoit_wolf"] / _month_end_prices["ledoit_wolf"].shift(1) - 1
     ).dropna() * 100
     _monthly_returns_pct = _monthly_returns_pct.iloc[-24:]
     _bar_colors = ["#2ecc71" if r >= 0 else "#e74c3c" for r in _monthly_returns_pct]
