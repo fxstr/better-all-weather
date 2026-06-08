@@ -16,7 +16,7 @@ bt = "^1.1.2"
 yfinance = "^0.2.55"
 python-dotenv = "^1.1.1"
 pandas-datareader = "^0.10.0"
-jupyter = "^1.1.1"
+marimo = ">=0.13"
 
 [build-system]
 requires = ["poetry-core"]

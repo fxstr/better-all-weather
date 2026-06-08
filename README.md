@@ -1,4 +1,11 @@
-# How to run:
-- In VS Code, install the `Jupytext` extension
-- Right-click on `src/ledoit_wolf_trend.py` 
-- Select `Open with Jupyter Notebook` (it may take some time before it shows up)
+# How to run
+
+```bash
+poetry run marimo run --watch src/ledoit_wolf_trend.py
+```
+
+# How to edit
+
+```bash
+poetry run marimo edit src/ledoit_wolf_trend.py
+```
